@@ -1,11 +1,11 @@
 const pool = require('../config/db');
 const path = require('path');
 const fs = require('fs');
+const XLSX = require('xlsx');
 
 /**
  * GET /api/slip-data
  * Returns formatted measurement data for the Slip component
- * Query param: id (measurement_id)
  */
 const getSlipData = async (req, res) => {
   try {
@@ -134,9 +134,8 @@ const getSlipData = async (req, res) => {
 
 /**
  * POST /api/fetch-data
- * Reads source file identified by SOURCE env from asset/source,
- * extracts program name from CSV, finds form ID, and creates a duplicate in asset/csv.
- * New name format: form_id + _ + (measurementCount + 1) + .csv
+ * Reads source file (xlsx or csv) identified by SOURCE env from asset/source,
+ * extracts program name from content, finds form ID, and creates a duplicate .csv in asset/csv.
  */
 const fetchData = async (req, res) => {
   try {
@@ -145,15 +144,31 @@ const fetchData = async (req, res) => {
       return res.status(400).json({ error: 'SOURCE environment variable not defined' });
     }
 
-    const sourceFileName = `${sourceEnv}.csv`;
-    const sourcePath = path.join(__dirname, '..', 'asset', 'source', sourceFileName);
+    let sourcePath = path.join(__dirname, '..', 'asset', 'source', `${sourceEnv}.xlsx`);
+    let isExcel = true;
 
     if (!fs.existsSync(sourcePath)) {
-      return res.status(404).json({ error: `Source file ${sourceFileName} not found in asset/source` });
+      sourcePath = path.join(__dirname, '..', 'asset', 'source', `${sourceEnv}.csv`);
+      isExcel = false;
     }
 
-    // 1. Read the CSV content and extract the Program name
-    const csvContent = fs.readFileSync(sourcePath, 'utf8');
+    if (!fs.existsSync(sourcePath)) {
+      return res.status(404).json({ error: `Source file ${sourceEnv}.xlsx or .csv not found in asset/source` });
+    }
+
+    // 1. Read the content and convert to CSV format if it's an Excel file
+    let csvContent = '';
+    if (isExcel) {
+      const workbook = XLSX.readFile(sourcePath);
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      // Convert to CSV string while maintaining structure
+      csvContent = XLSX.utils.sheet_to_csv(worksheet);
+    } else {
+      csvContent = fs.readFileSync(sourcePath, 'utf8');
+    }
+
+    // 2. Extract the Program name from the (now) CSV content
     const lines = csvContent.split(/\r?\n/);
     let programName = null;
 
@@ -166,24 +181,24 @@ const fetchData = async (req, res) => {
 
     if (!programName) {
       return res.status(400).json({ 
-        error: `Could not find "Program name" in the source file: ${sourceFileName}`,
+        error: `Could not find "Program name" in the source content of ${sourceEnv}`,
         contentPreview: lines.slice(0, 5).join('\n')
       });
     }
 
-    // 2. Find form ID from forms table by the extracted programName
+    // 3. Find form ID from forms table by the extracted programName
     const [forms] = await pool.execute(
       'SELECT id FROM forms WHERE name = ?',
       [programName]
     );
 
     if (forms.length === 0) {
-      return res.status(404).json({ error: `Form with program name "${programName}" (found in CSV) not found in database` });
+      return res.status(404).json({ error: `Form with program name "${programName}" not found in database` });
     }
 
     const formId = forms[0].id;
 
-    // 3. Count measurements for this form
+    // 4. Count measurements for this form
     const [counts] = await pool.execute(
       'SELECT COUNT(*) as total FROM measurements WHERE form_id = ?',
       [formId]
@@ -191,26 +206,27 @@ const fetchData = async (req, res) => {
     const measurementCount = counts[0].total;
     const nextIndex = measurementCount + 1;
 
-    // 4. Define paths and copy
+    // 5. Define target folder and filename
     const targetFileName = `${formId}_${nextIndex}.csv`;
-    const folderName = programName; // e.g. "T-797-2.72-2.20-RSJ-STRATE"
+    const folderName = programName;
     const csvDir = path.join(__dirname, '..', 'asset', 'csv', folderName);
     const targetPath = path.join(csvDir, targetFileName);
 
-    // Ensure the program-specific sub-folder exists
     if (!fs.existsSync(csvDir)) {
       fs.mkdirSync(csvDir, { recursive: true });
     }
 
-    fs.copyFileSync(sourcePath, targetPath);
+    // 6. Save as CSV file (using the string content we have)
+    fs.writeFileSync(targetPath, csvContent, 'utf8');
 
     res.json({ 
       success: true, 
-      message: `Created duplicate CSV in folder "${folderName}": ${targetFileName}`,
+      message: `Created duplicate CSV from ${isExcel ? 'Excel' : 'CSV'} in folder "${folderName}": ${targetFileName}`,
       file: targetFileName,
       folder: folderName,
       extractedProgramName: programName,
-      formId: formId
+      formId: formId,
+      originalFormat: isExcel ? 'xlsx' : 'csv'
     });
 
   } catch (error) {
