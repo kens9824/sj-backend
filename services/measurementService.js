@@ -25,8 +25,21 @@ async function processCSV(filePath, fileName) {
         const parsedData = parseKeyenceCSV(filePath);
         const { header, measurements } = parsedData;
 
+        // Calculate overall result based on individual items
+        // If all items are OK, overall is OK. If at least one is NG, overall is NG.
+        const hasNG = measurements.some(m => m.res === 'NG');
+        const calculatedOverallResult = (measurements.length > 0 && hasNG) ? 'NG' : 'OK';
+
         // Convert date format
-        const dateStr = header['Measurement Date and Time'];
+        // Handle combined field or separate Measurement Date and Time fields
+        let dateStr = header['Measurement Date and Time'];
+        if (!dateStr && header['Measurement Date']) {
+            dateStr = header['Measurement Date'];
+            if (header['Time']) {
+                dateStr += ` ${header['Time']}`;
+            }
+        }
+
         let mysqlDate = null;
         if (dateStr) {
             const date = new Date(dateStr);
@@ -38,7 +51,7 @@ async function processCSV(filePath, fileName) {
         // Insert into measurements table
         const [mResult] = await pool.execute(
             'INSERT INTO measurements (form_id, excel_name, program_name, measurement_datetime, overall_result) VALUES (?, ?, ?, ?, ?)',
-            [formId, fileName, header['Program name'] || null, mysqlDate, header['Overall result'] || null]
+            [formId, fileName, header['Program name'] || null, mysqlDate, calculatedOverallResult]
         );
 
         const measurementId = mResult.insertId;
@@ -55,7 +68,7 @@ async function processCSV(filePath, fileName) {
             id: measurementId,
             form_id: formId,
             excel_name: fileName,
-            overall_result: header['Overall result']
+            overall_result: calculatedOverallResult
         };
 
     } catch (error) {

@@ -132,4 +132,91 @@ const getSlipData = async (req, res) => {
   }
 };
 
-module.exports = { getSlipData };
+/**
+ * POST /api/fetch-data
+ * Reads source file identified by SOURCE env from asset/source,
+ * extracts program name from CSV, finds form ID, and creates a duplicate in asset/csv.
+ * New name format: form_id + _ + (measurementCount + 1) + .csv
+ */
+const fetchData = async (req, res) => {
+  try {
+    const sourceEnv = process.env.SOURCE;
+    if (!sourceEnv) {
+      return res.status(400).json({ error: 'SOURCE environment variable not defined' });
+    }
+
+    const sourceFileName = `${sourceEnv}.csv`;
+    const sourcePath = path.join(__dirname, '..', 'asset', 'source', sourceFileName);
+
+    if (!fs.existsSync(sourcePath)) {
+      return res.status(404).json({ error: `Source file ${sourceFileName} not found in asset/source` });
+    }
+
+    // 1. Read the CSV content and extract the Program name
+    const csvContent = fs.readFileSync(sourcePath, 'utf8');
+    const lines = csvContent.split(/\r?\n/);
+    let programName = null;
+
+    for (const line of lines) {
+      if (line.startsWith('Program name,')) {
+        programName = line.split(',')[1]?.trim();
+        break;
+      }
+    }
+
+    if (!programName) {
+      return res.status(400).json({ 
+        error: `Could not find "Program name" in the source file: ${sourceFileName}`,
+        contentPreview: lines.slice(0, 5).join('\n')
+      });
+    }
+
+    // 2. Find form ID from forms table by the extracted programName
+    const [forms] = await pool.execute(
+      'SELECT id FROM forms WHERE name = ?',
+      [programName]
+    );
+
+    if (forms.length === 0) {
+      return res.status(404).json({ error: `Form with program name "${programName}" (found in CSV) not found in database` });
+    }
+
+    const formId = forms[0].id;
+
+    // 3. Count measurements for this form
+    const [counts] = await pool.execute(
+      'SELECT COUNT(*) as total FROM measurements WHERE form_id = ?',
+      [formId]
+    );
+    const measurementCount = counts[0].total;
+    const nextIndex = measurementCount + 1;
+
+    // 4. Define paths and copy
+    const targetFileName = `${formId}_${nextIndex}.csv`;
+    const folderName = programName; // e.g. "T-797-2.72-2.20-RSJ-STRATE"
+    const csvDir = path.join(__dirname, '..', 'asset', 'csv', folderName);
+    const targetPath = path.join(csvDir, targetFileName);
+
+    // Ensure the program-specific sub-folder exists
+    if (!fs.existsSync(csvDir)) {
+      fs.mkdirSync(csvDir, { recursive: true });
+    }
+
+    fs.copyFileSync(sourcePath, targetPath);
+
+    res.json({ 
+      success: true, 
+      message: `Created duplicate CSV in folder "${folderName}": ${targetFileName}`,
+      file: targetFileName,
+      folder: folderName,
+      extractedProgramName: programName,
+      formId: formId
+    });
+
+  } catch (error) {
+    console.error('Error in fetchData:', error);
+    res.status(500).json({ error: 'Failed to fetch and duplicate data', details: error.message });
+  }
+};
+
+module.exports = { getSlipData, fetchData };
