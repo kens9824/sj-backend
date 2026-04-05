@@ -80,6 +80,9 @@ async function processSourceFile(filePath, io) {
                 dateStr += ` ${header['Time']}`;
             }
         }
+
+        console.log("dateStr",dateStr);
+        
         
         if (!dateStr) {
             console.warn(`[Watcher] No Date/Time found in source file content.`);
@@ -95,12 +98,16 @@ async function processSourceFile(filePath, io) {
 
         // 3. Compare with last measurement in DB
         const [lastM] = await pool.execute(
-            'SELECT measurement_datetime FROM measurements WHERE form_id = ? ORDER BY measurement_datetime DESC LIMIT 1',
-            [formId]
+            'SELECT created_at FROM measurements ORDER BY created_at DESC LIMIT 1'
         );
 
+        console.log("last",lastM);
+        
+
         if (lastM.length > 0) {
-            const lastDBDate = new Date(lastM[0].measurement_datetime);
+            const lastDBDate = new Date(lastM[0].created_at);
+            console.log("lastDBDate",lastDBDate);
+            
             // If the dates match, it is a duplicate save, skip.
             if (Math.abs(lastDBDate.getTime() - fileDate.getTime()) < 1000) { 
                 console.log(`[Watcher] Data for ${programName} already up to date (${mysqlDate}). Skipping.`);
