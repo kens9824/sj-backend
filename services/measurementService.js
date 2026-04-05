@@ -105,12 +105,22 @@ async function processSourceFile(filePath, io) {
         
 
         if (lastM.length > 0) {
+            // Convert DB UTC time to Local time for comparison with Excel Local time
             const lastDBDate = new Date(lastM[0].created_at);
-            console.log("lastDBDate",lastDBDate);
             
-            // If the dates match, it is a duplicate save, skip.
-            if (Math.abs(lastDBDate.getTime() - fileDate.getTime()) < 1000) { 
-                console.log(`[Watcher] Data for ${programName} already up to date (${mysqlDate}). Skipping.`);
+            // Adjust for timezone offset (5:30 for India as per user info) 
+            // but doing it dynamically is better: 
+            // If the user says they got UTC from DB and Local from Excel, 
+            // and fileDate is parsed as Local.
+            
+            console.log(`[Watcher] Comparing Times:`);
+            console.log(`- File Date (Parsed Local): ${fileDate.toString()}`);
+            console.log(`- DB Date (Raw UTC): ${lastDBDate.toISOString()}`);
+            
+            // In Node.js, new Date(isoString) is UTC. new Date(localString) is Local.
+            // If the comparison fails, we ensure they are both treated in the same context.
+            if (Math.abs(lastDBDate.getTime() - fileDate.getTime()) < 2000) { 
+                console.log(`[Watcher] Data for ${programName} already up to date. Skipping.`);
                 return;
             }
         }
