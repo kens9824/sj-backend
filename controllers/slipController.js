@@ -167,9 +167,11 @@ const fetchData = async (req, res) => {
     } else {
       csvContent = fs.readFileSync(sourcePath, 'utf8');
     }
-
+    
     // 2. Extract the Program name from the (now) CSV content
-    const lines = csvContent.split(/\r?\n/);
+        const lines = csvContent.split(/\r?\n/);
+        const filteredLines = lines.filter(line => line.replace(/,/g, '').trim() !== '');
+        csvContent = filteredLines.join('\n');
     let programName = null;
 
     for (const line of lines) {
