@@ -80,9 +80,6 @@ async function processSourceFile(filePath, io) {
                 dateStr += ` ${header['Time']}`;
             }
         }
-
-        console.log("dateStr",dateStr);
-        
         
         if (!dateStr) {
             console.warn(`[Watcher] No Date/Time found in source file content.`);
@@ -98,29 +95,15 @@ async function processSourceFile(filePath, io) {
 
         // 3. Compare with last measurement in DB
         const [lastM] = await pool.execute(
-            'SELECT created_at FROM measurements ORDER BY created_at DESC LIMIT 1'
+            'SELECT measurement_datetime FROM measurements WHERE form_id = ? ORDER BY measurement_datetime DESC LIMIT 1',
+            [formId]
         );
 
-        console.log("last",lastM);
-        
-
         if (lastM.length > 0) {
-            // Convert DB UTC time to Local time for comparison with Excel Local time
-            const lastDBDate = new Date(lastM[0].created_at);
-            
-            // Adjust for timezone offset (5:30 for India as per user info) 
-            // but doing it dynamically is better: 
-            // If the user says they got UTC from DB and Local from Excel, 
-            // and fileDate is parsed as Local.
-            
-            console.log(`[Watcher] Comparing Times:`);
-            console.log(`- File Date (Parsed Local): ${fileDate.toString()}`);
-            console.log(`- DB Date (Raw UTC): ${lastDBDate.toISOString()}`);
-            
-            // In Node.js, new Date(isoString) is UTC. new Date(localString) is Local.
-            // If the comparison fails, we ensure they are both treated in the same context.
-            if (Math.abs(lastDBDate.getTime() - fileDate.getTime()) < 2000) { 
-                console.log(`[Watcher] Data for ${programName} already up to date. Skipping.`);
+            const lastDBDate = new Date(lastM[0].measurement_datetime);
+            // If the dates match, it is a duplicate save, skip.
+            if (Math.abs(lastDBDate.getTime() - fileDate.getTime()) < 1000) { 
+                console.log(`[Watcher] Data for ${programName} already up to date (${mysqlDate}). Skipping.`);
                 return;
             }
         }

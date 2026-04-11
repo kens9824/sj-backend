@@ -1,4 +1,6 @@
 const pool = require('../config/db');
+const fs = require('fs');
+const path = require('path');
 
 /**
  * GET /api/measurements/form/:formId
@@ -91,4 +93,34 @@ const getAllMeasurements = async (req, res) => {
     }
 };
 
-module.exports = { getMeasurementsByFormId, getAllMeasurements };
+const deleteMeasurement = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // 1. Get the excel_name to delete the file
+        const [rows] = await pool.execute('SELECT excel_name FROM measurements WHERE id = ?', [id]);
+        
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Measurement not found' });
+        }
+
+        const excelName = rows[0].excel_name;
+
+        // 2. Delete the DB record (cascading will handle results table)
+        await pool.execute('DELETE FROM measurements WHERE id = ?', [id]);
+
+        // 3. Delete the CSV file if it exists
+        const csvPath = path.join(__dirname, '..', 'asset', 'csv', excelName);
+        
+        if (fs.existsSync(csvPath)) {
+            fs.unlinkSync(csvPath);
+        }
+
+        res.json({ message: 'Measurement deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting measurement:', error);
+        res.status(500).json({ error: 'Failed to delete measurement', details: error.message });
+    }
+};
+
+module.exports = { getMeasurementsByFormId, getAllMeasurements, deleteMeasurement };
