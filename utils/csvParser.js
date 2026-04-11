@@ -8,16 +8,7 @@ const path = require('path');
  */
 function parseKeyenceCSV(filePath) {
     const content = fs.readFileSync(filePath, 'utf8');
-    return parseKeyenceContent(content);
-}
-
-/**
- * Parses raw Keyence content string
- * @param {string} content Raw CSV string
- * @returns {object} Parsed data
- */
-function parseKeyenceContent(content) {
-    const lines = content.split(/\r?\n/).map(l => l.trim()).filter(l => l !== '');
+    const lines = content.split(/\r?\n/);
     
     const result = {
         header: {},
@@ -27,15 +18,12 @@ function parseKeyenceContent(content) {
     let readingResults = false;
 
     for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
+        const line = lines[i].trim();
+        if (!line) continue;
 
         if (line.includes('Measurement results')) {
             readingResults = true;
-            // Next line might be the sub-header row (No., measurement item...)
-            // Wait, we need to check if the next line exists
-            if (i + 1 < lines.length && lines[i+1].startsWith('No.')) {
-                i++; 
-            }
+            i++; // Skip the header row (No., measurement item...)
             continue;
         }
 
@@ -68,4 +56,4 @@ function parseKeyenceContent(content) {
     return result;
 }
 
-module.exports = { parseKeyenceCSV, parseKeyenceContent };
+module.exports = { parseKeyenceCSV };

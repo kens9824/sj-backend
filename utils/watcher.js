@@ -1,6 +1,6 @@
 const chokidar = require('chokidar');
 const path = require('path');
-const { processCSV, processSourceFile } = require('../services/measurementService');
+const { processCSV } = require('../services/measurementService');
 
 /**
  * Initialize file watcher
@@ -8,50 +8,33 @@ const { processCSV, processSourceFile } = require('../services/measurementServic
  */
 function initCSVWatcher(io) {
     const csvDir = path.join(__dirname, '..', 'asset', 'csv');
-    const sourceDir = path.join(__dirname, '..', 'asset', 'source');
     
-    console.log(`Watching for data files...`);
-    console.log(`- CSV drops in: ${csvDir}`);
-    console.log(`- Source files in: ${sourceDir}`);
+    console.log(`Watching for new CSV files in: ${csvDir}`);
 
-    const watcher = chokidar.watch([csvDir, sourceDir], {
-        ignored: /(^|[\/\\])\../,
+    const watcher = chokidar.watch(csvDir, {
+        ignored: /(^|[\/\\])\../, // ignore dotfiles
         persistent: true,
-        ignoreInitial: true,
-        awaitWriteFinish: {
-            stabilityThreshold: 2000, // Wait 2s for file to finish writing
-            pollInterval: 100
-        }
+        ignoreInitial: true // don't trigger for existing files
     });
 
-    const handleFile = async (filePath) => {
+    watcher.on('add', async (filePath) => {
         const fileName = path.basename(filePath);
+        if (!fileName.endsWith('.csv')) return;
+
+        console.log(`New CSV detected: ${fileName}`);
         
-        // CASE 1: Specific source file (from .env)
-        const sourceEnv = process.env.SOURCE;
-        if (filePath.includes(sourceDir)) {
-            if (fileName === `${sourceEnv}.xlsx` || fileName === `${sourceEnv}.csv`) {
-                console.log(`[Watcher] Source file updated: ${fileName}`);
-                await processSourceFile(filePath, io);
+        try {
+            const measurement = await processCSV(filePath, fileName);
+            console.log(`Successfully processed: ${fileName}`);
+            
+            // Notify UI
+            if (io) {
+                io.emit('new_measurement', measurement);
             }
-            return;
+        } catch (err) {
+            console.error(`Watcher failed to process ${fileName}:`, err.message);
         }
-
-        // CASE 2: Processed CSV drop
-        if (filePath.includes(csvDir) && fileName.endsWith('.csv')) {
-            console.log(`[Watcher] New processed CSV detected: ${fileName}`);
-            try {
-                const measurement = await processCSV(filePath, fileName);
-                console.log(`Successfully processed: ${fileName}`);
-                if (io) io.emit('new_measurement', measurement);
-            } catch (err) {
-                console.error(`Watcher failed to process ${fileName}:`, err.message);
-            }
-        }
-    };
-
-    watcher.on('add', handleFile);
-    watcher.on('change', handleFile);
+    });
 
     return watcher;
 }
