@@ -65,8 +65,8 @@ const getAllMeasurements = async (req, res) => {
         }
 
         if (startDate && endDate) {
-            countQuery += ` AND DATE(m.measurement_datetime) BETWEEN ? AND ?`;
-            dataQuery += ` AND DATE(m.measurement_datetime) BETWEEN ? AND ?`;
+            countQuery += ` AND DATE(m.created_at) BETWEEN ? AND ?`;
+            dataQuery += ` AND DATE(m.created_at) BETWEEN ? AND ?`;
             params.push(startDate, endDate);
         }
 

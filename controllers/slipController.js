@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const path = require('path');
+const {  parseKeyenceCSV } = require('../utils/csvParser');
 const fs = require('fs');
 const XLSX = require('xlsx');
 
@@ -221,9 +222,19 @@ const fetchData = async (req, res) => {
     // 6. Save as CSV file (using the string content we have)
     fs.writeFileSync(targetPath, csvContent, 'utf8');
 
+    // const [mResult] = await pool.execute(
+    //     'INSERT INTO measurements (form_id, excel_name, program_name, measurement_datetime, overall_result) VALUES (?, ?, ?, ?, ?)',
+    //     [formId, targetFileName, programName || null, mysqlDate, calculatedOverallResult]
+    // );
+
+    const parsedData = parseKeyenceCSV(targetPath);
+    const result = await saveToDB(parsedData, formId, targetFileName);
+    console.log("result",result);
+    
     res.json({ 
       success: true, 
       message: `Created duplicate CSV from ${isExcel ? 'Excel' : 'CSV'} in folder "${folderName}": ${targetFileName}`,
+      id: result.id,
       file: targetFileName,
       folder: folderName,
       extractedProgramName: programName,
@@ -236,5 +247,53 @@ const fetchData = async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch and duplicate data', details: error.message });
   }
 };
+
+
+async function saveToDB(parsedData, formId, fileName) {
+    const { header, measurements } = parsedData;
+    
+    // Calculate overall result
+    const hasNG = measurements.some(m => m.res === 'NG' || m.res === 'NG'); // Support both NG and NG
+    const calculatedOverallResult = (measurements.length > 0 && hasNG) ? 'NG' : 'OK';
+
+    // Date handling
+    let dateStr = header['Measurement Date and Time'];
+    if (!dateStr && header['Measurement Date']) {
+        dateStr = header['Measurement Date'];
+        if (header['Time']) {
+            dateStr += ` ${header['Time']}`;
+        }
+    }
+
+    let mysqlDate = null;
+    if (dateStr) {
+        const date = new Date(dateStr);
+        if (!isNaN(date.getTime())) {
+            mysqlDate = date.toISOString().slice(0, 19).replace('T', ' ');
+        }
+    }
+
+    const [mResult] = await pool.execute(
+        'INSERT INTO measurements (form_id, excel_name, program_name, measurement_datetime, overall_result) VALUES (?, ?, ?, ?, ?)',
+        [formId, fileName, header['Program name'] || null, mysqlDate, calculatedOverallResult]
+    );
+
+    const measurementId = mResult.insertId;
+
+    for (const m of measurements) {
+        await pool.execute(
+            'INSERT INTO results (measurement_id, item_label, mes_value, units, design_val, upper_limit, lower_limit, res) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [measurementId, m.item, m.value, m.units, m.design_val, m.upper_limit, m.lower_limit, m.res]
+        );
+    }
+
+    return {
+        id: measurementId,
+        form_id: formId,
+        excel_name: fileName,
+        overall_result: calculatedOverallResult,
+        measurement_datetime: mysqlDate
+    };
+}
 
 module.exports = { getSlipData, fetchData };
